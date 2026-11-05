@@ -71,8 +71,10 @@ export async function POST(request: Request) {
       Math.random().toString(16).substring(2, 10);
     let workflowWarning: string | undefined;
 
-    // Live GitHub API Push when a real token is provided
+    // === LIVE GITHUB API PUSH ===
     if (token && !token.startsWith("ghp_signzel_demo")) {
+      
+      // 1. Authenticate Token
       const userRes = await fetch("https://api.github.com/user", {
         headers: GH_HEADERS(token),
         cache: "no-store",
@@ -80,11 +82,7 @@ export async function POST(request: Request) {
 
       if (!userRes.ok) {
         return NextResponse.json(
-          {
-            ok: false,
-            error:
-              "GitHub token authentication failed during push. Please re-verify your GitHub PAT.",
-          },
+          { ok: false, error: "GitHub token authentication failed. Please re-verify your GitHub PAT and ensure it has 'repo' and 'workflow' scopes." },
           { status: 401 }
         );
       }
@@ -93,17 +91,14 @@ export async function POST(request: Request) {
       githubOwner = userData.login;
       mode = "live";
 
-      // Check if repo exists
+      // 2. Check if repo exists
       let repoRes = await fetch(
         `https://api.github.com/repos/${githubOwner}/${repoName}`,
-        {
-          headers: GH_HEADERS(token),
-          cache: "no-store",
-        }
+        { headers: GH_HEADERS(token), cache: "no-store" }
       );
 
       if (repoRes.status === 404) {
-        // Create repository with auto_init: true so main branch & initial commit exist
+        // Create repository if it doesn't exist
         repoRes = await fetch("https://api.github.com/user/repos", {
           method: "POST",
           headers: GH_HEADERS(token),
@@ -118,118 +113,130 @@ export async function POST(request: Request) {
         if (!repoRes.ok) {
           const errJson = await repoRes.json().catch(() => ({}));
           return NextResponse.json(
-            {
-              ok: false,
-              error:
-                errJson?.message ||
-                `Failed to create repository ${repoName} on GitHub (HTTP ${repoRes.status}).`,
-            },
+            { ok: false, error: errJson?.message || `Failed to create repository on GitHub (HTTP ${repoRes.status}).` },
             { status: 400 }
           );
         }
-        // Brief pause for GitHub initial commit propagation
-        await new Promise((r) => setTimeout(r, 1200));
+        
+        // Wait 2 seconds for GitHub to initialize the repo and create the initial commit
+        await new Promise((r) => setTimeout(r, 2000));
+      } else if (!repoRes.ok) {
+        return NextResponse.json(
+          { ok: false, error: `Failed to access GitHub repo (HTTP ${repoRes.status}). Check token scopes.` },
+          { status: repoRes.status }
+        );
       }
 
       const repoData = await repoRes.json();
       repoUrl = repoData.html_url || `https://github.com/${githubOwner}/${repoName}`;
       const defaultBranch = repoData.default_branch || branch || "main";
 
-      // Get latest commit SHA on defaultBranch
+      // 3. Get latest commit SHA on defaultBranch
       const refRes = await fetch(
         `https://api.github.com/repos/${githubOwner}/${repoName}/git/ref/heads/${defaultBranch}`,
+        { headers: GH_HEADERS(token), cache: "no-store" }
+      );
+
+      if (!refRes.ok) {
+        return NextResponse.json(
+          { ok: false, error: "Failed to get repo branch reference. GitHub repo might be empty or branch name is wrong." },
+          { status: 500 }
+        );
+      }
+
+      const refData = await refRes.json();
+      const baseCommitSha = refData?.object?.sha;
+
+      // 4. Create Git Tree
+      const treeEntries = files.map((file) => ({
+        path: file.repoPath.replace(/^\/+/, ""),
+        mode: "100644",
+        type: "blob",
+        content: file.content,
+      }));
+
+      let treeRes = await fetch(
+        `https://api.github.com/repos/${githubOwner}/${repoName}/git/trees`,
         {
+          method: "POST",
           headers: GH_HEADERS(token),
-          cache: "no-store",
+          body: JSON.stringify({ base_tree: baseCommitSha, tree: treeEntries }),
         }
       );
 
-      if (refRes.ok) {
-        const refData = await refRes.json();
-        const baseCommitSha = refData?.object?.sha;
-
-        // Build tree entries
-        const treeEntries = files.map((file) => ({
-          path: file.repoPath.replace(/^\/+/, ""),
+      // Fallback if token lacks 'workflow' scope for .github/workflows
+      if (!treeRes.ok) {
+        workflowWarning = "Your GitHub token might be missing the 'workflow' scope. The build-apk.yml was saved as Sign-Zel-Workflow-build-apk.yml instead.";
+        const fallbackEntries = files.map((file) => ({
+          path: file.repoPath === ".github/workflows/build-apk.yml" 
+            ? "Sign-Zel-Workflow-build-apk.yml" 
+            : file.repoPath.replace(/^\/+/, ""),
           mode: "100644",
           type: "blob",
           content: file.content,
         }));
-
-        let treeRes = await fetch(
+        
+        treeRes = await fetch(
           `https://api.github.com/repos/${githubOwner}/${repoName}/git/trees`,
           {
             method: "POST",
             headers: GH_HEADERS(token),
-            body: JSON.stringify({
-              base_tree: baseCommitSha,
-              tree: treeEntries,
-            }),
+            body: JSON.stringify({ base_tree: baseCommitSha, tree: fallbackEntries }),
           }
         );
-
-        // If token lacks `workflow` scope, GitHub rejects `.github/workflows/build-apk.yml` with 422/403.
-        // We gracefully fallback to pushing the Android files + workflow template at `github-workflows/build-apk.yml`.
-        if (!treeRes.ok) {
-          workflowWarning =
-            "Your GitHub token did not have the 'workflow' OAuth scope enabled, so build-apk.yml was also saved as Sign-Zel-Workflow-build-apk.yml.";
-          const fallbackEntries = files.map((file) => ({
-            path:
-              file.repoPath === ".github/workflows/build-apk.yml"
-                ? "Sign-Zel-Workflow-build-apk.yml"
-                : file.repoPath.replace(/^\/+/, ""),
-            mode: "100644",
-            type: "blob",
-            content: file.content,
-          }));
-          treeRes = await fetch(
-            `https://api.github.com/repos/${githubOwner}/${repoName}/git/trees`,
-            {
-              method: "POST",
-              headers: GH_HEADERS(token),
-              body: JSON.stringify({
-                base_tree: baseCommitSha,
-                tree: fallbackEntries,
-              }),
-            }
-          );
-        }
-
-        if (treeRes.ok) {
-          const treeData = await treeRes.json();
-          const commitRes = await fetch(
-            `https://api.github.com/repos/${githubOwner}/${repoName}/git/commits`,
-            {
-              method: "POST",
-              headers: GH_HEADERS(token),
-              body: JSON.stringify({
-                message: `⚡ Sign Zel AI: Synthesize ${branding.appName} Android APK project & CI workflow`,
-                tree: treeData.sha,
-                parents: [baseCommitSha],
-              }),
-            }
-          );
-
-          if (commitRes.ok) {
-            const commitData = await commitRes.json();
-            commitSha = commitData.sha;
-
-            await fetch(
-              `https://api.github.com/repos/${githubOwner}/${repoName}/git/refs/heads/${defaultBranch}`,
-              {
-                method: "PATCH",
-                headers: GH_HEADERS(token),
-                body: JSON.stringify({
-                  sha: commitSha,
-                  force: true,
-                }),
-              }
-            );
-          }
-        }
       }
 
-      // Attempt workflow_dispatch trigger (push trigger also fires automatically)
+      if (!treeRes.ok) {
+        return NextResponse.json(
+          { ok: false, error: "Failed to create Git tree. Check your PAT permissions." },
+          { status: 400 }
+        );
+      }
+
+      const treeData = await treeRes.json();
+
+      // 5. Create Commit
+      const commitRes = await fetch(
+        `https://api.github.com/repos/${githubOwner}/${repoName}/git/commits`,
+        {
+          method: "POST",
+          headers: GH_HEADERS(token),
+          body: JSON.stringify({
+            message: `⚡ Sign Zel AI: Synthesize ${branding.appName} Android APK project & CI workflow`,
+            tree: treeData.sha,
+            parents: [baseCommitSha],
+          }),
+        }
+      );
+
+      if (!commitRes.ok) {
+        return NextResponse.json(
+          { ok: false, error: "Failed to create commit on GitHub." },
+          { status: 400 }
+        );
+      }
+
+      const commitData = await commitRes.json();
+      commitSha = commitData.sha;
+
+      // 6. Update Branch Reference
+      const updateRefRes = await fetch(
+        `https://api.github.com/repos/${githubOwner}/${repoName}/git/refs/heads/${defaultBranch}`,
+        {
+          method: "PATCH",
+          headers: GH_HEADERS(token),
+          body: JSON.stringify({ sha: commitSha, force: true }),
+        }
+      );
+
+      if (!updateRefRes.ok) {
+        return NextResponse.json(
+          { ok: false, error: "Failed to update branch with new commit." },
+          { status: 400 }
+        );
+      }
+
+      // 7. Attempt workflow_dispatch trigger (Push trigger will also fire automatically)
       await fetch(
         `https://api.github.com/repos/${githubOwner}/${repoName}/actions/workflows/build-apk.yml/dispatches`,
         {
@@ -242,6 +249,7 @@ export async function POST(request: Request) {
       workflowRunUrl = `${repoUrl}/actions`;
     }
 
+    // === DATABASE SAVING & RESPONSE ===
     const artifactSlug =
       branding.appName
         .toLowerCase()
