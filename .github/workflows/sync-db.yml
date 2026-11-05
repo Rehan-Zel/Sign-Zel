@@ -18,4 +18,4 @@ jobs:
       - name: Push Drizzle Schema to Neon
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: npx drizzle-kit push
+        run: npx drizzle-kit push --config=drizzle.config.ts --force
