@@ -1,0 +1,96 @@
+@import "tailwindcss";
+
+:root,
+[data-theme="dark"] {
+  --bg-primary: #0b0f17;
+  --bg-surface: #131b2e;
+  --bg-elevated: #1c2742;
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --accent-primary: #6366f1;
+  --accent-secondary: #06b6d4;
+  --border-subtle: #26334d;
+  --radius-card: 12px;
+}
+
+[data-theme="light"] {
+  --bg-primary: #f8fafc;
+  --bg-surface: #ffffff;
+  --bg-elevated: #f1f5f9;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --accent-primary: #4f46e5;
+  --accent-secondary: #0891b2;
+  --border-subtle: #e2e8f0;
+  --radius-card: 12px;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.font-display {
+  font-family: var(--font-display), system-ui, sans-serif;
+}
+
+.font-mono-code {
+  font-family: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* Studio surface helpers bound to CSS variables */
+.zel-bg-primary {
+  background-color: var(--bg-primary);
+}
+
+.zel-bg-surface {
+  background-color: var(--bg-surface);
+}
+
+.zel-bg-elevated {
+  background-color: var(--bg-elevated);
+}
+
+.zel-text-primary {
+  color: var(--text-primary);
+}
+
+.zel-text-secondary {
+  color: var(--text-secondary);
+}
+
+.zel-border {
+  border-color: var(--border-subtle);
+}
+
+.zel-card {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+}
+
+.zel-accent-bg {
+  background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+}
+
+.zel-accent-border {
+  border-color: var(--accent-primary);
+}
+
+/* Custom sleek scrollbars */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.25);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.45);
+}
