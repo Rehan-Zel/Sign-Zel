@@ -381,6 +381,29 @@ export async function POST(request: Request) {
         apkArtifactName: `${artifactSlug}-debug-apk.apk`,
       })
       .returning();
+    // ... (previous code where it triggers the workflow)
+
+// WAIT 3 SECONDS FOR GITHUB TO REGISTER THE RUN
+await new Promise(r => setTimeout(r, 3000));
+
+// FETCH THE RUN ID
+const runsRes = await fetch(`https://api.github.com/repos/${githubOwner}/${repoName}/actions/runs`, {
+  headers: GH_HEADERS(token),
+});
+const runsData = await runsRes.json();
+const latestRunId = runsData.workflow_runs[0]?.id;
+
+workflowRunUrl = `${repoUrl}/actions`;
+
+// RETURN THIS WITH THE RESPONSE
+return NextResponse.json({
+  ok: true,
+  mode,
+  runId: latestRunId, // <-- ADD THIS
+  githubOwner,        // <-- MAKE SURE THIS IS HERE
+  repoName,           // <-- MAKE SURE THIS IS HERE
+  // ... (keep all your other response fields like project, buildRun, etc.)
+});
 
     return NextResponse.json({
       ok: true,
